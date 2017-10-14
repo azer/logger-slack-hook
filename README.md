@@ -1,8 +1,8 @@
 # logger-slack-hook
 
 Slack hook for [logger](https://github.com/azer/logger).
-You stream specific packages, log levels and logs with specific attributes to Slack.
-For example, you can log MySQL queries taking longer than 500ms into Slack:
+Packages, log levels and attributes can be specified for streaming into Slack.
+For example, you can get MySQL queries taking longer than 500ms reported to Slack:
 
 ```go
 import (
