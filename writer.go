@@ -5,16 +5,21 @@ import (
 	"fmt"
 	"github.com/azer/logger"
 	"net/http"
+	"strings"
 	"time"
 )
 
+const DEFAULT_INTERVAL_SECS = 10
+
 type Writer struct {
-	WebHookURL   string
-	Channel      string
-	Username     string
-	Filter       func(*logger.Log) bool
-	Queue        []string
-	LastPostedAt int64
+	WebHookURL      string
+	Channel         string
+	Username        string
+	Filter          func(*logger.Log) bool
+	Queue           []string
+	LastPostedAt    int64
+	IsWorkerRunning bool
+	IntervalSecs    int
 }
 
 func (writer *Writer) ClearQueue() string {
@@ -28,39 +33,40 @@ func (writer *Writer) ClearQueue() string {
 	return content
 }
 
-func (writer *Writer) Post(log *logger.Log) {
-	writer.Queue = append(writer.Queue, fmt.Sprintf("%s %s %s", writer.FormatLevel(log.Level), log.Message, writer.FormatAttrs(log.Attrs)))
+func (writer *Writer) Append(log *logger.Log) {
+	writer.Queue = append(writer.Queue, fmt.Sprintf("%s %s %s", writer.FormatLevel(log), log.Message, writer.FormatAttrs(log.Attrs)))
 
-	// Post slack every with 10 seconds breaks
-	if Now()-writer.LastPostedAt <= 10 {
-		// Not ready yet, keep it in the queue.
+	if !writer.IsWorkerRunning {
+		go writer.Worker()
+	}
+}
+
+func (writer *Writer) Worker() {
+	if writer.IsWorkerRunning {
 		return
 	}
 
-	writer.LastPostedAt = Now()
-	content := writer.ClearQueue()
-
-	var body = []byte(fmt.Sprintf(`{"channel": "#%s", "username": "%s", "text": "%s"}`, writer.Channel, writer.Username, content))
-
-	req, err := http.NewRequest("POST", writer.WebHookURL, bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Println(fmt.Sprintf("logger-slack-hook error: %v", err))
+	writer.IsWorkerRunning = true
+	if writer.IntervalSecs == 0 {
+		writer.IntervalSecs = DEFAULT_INTERVAL_SECS
 	}
 
-	defer resp.Body.Close()
+	t := time.NewTicker(time.Duration(writer.IntervalSecs) * time.Second)
+	for {
+		writer.Post()
+		<-t.C
+	}
+
+	writer.IsWorkerRunning = false
 }
 
 func (writer Writer) Write(log *logger.Log) {
 	if writer.Filter != nil {
 		if writer.Filter(log) {
-			writer.Post(log)
+			writer.Append(log)
 		}
 	} else {
-		writer.Post(log)
+		writer.Append(log)
 	}
 }
 
@@ -71,23 +77,46 @@ func (writer *Writer) FormatAttrs(attrs *logger.Attrs) string {
 
 	result := ""
 	for key, val := range *attrs {
-		result = fmt.Sprintf("%s\n       %s: %v", result, key, val)
+		result = fmt.Sprintf("%s\n %s: %v", result, key, val)
 	}
 
-	return result
+	if len(strings.TrimSpace(result)) > 0 {
+		return fmt.Sprintf("```%s```", result)
+	}
+
+	return ""
 }
 
-func (writer *Writer) FormatLevel(level string) string {
-	switch level {
+func (writer *Writer) FormatLevel(log *logger.Log) string {
+	switch log.Level {
 	case "INFO":
 		return ":memo:"
 	case "ERROR":
-		return ":warning:"
+		return ":mushroom:"
 	case "TIMER":
-		return ":timer_clock:"
+		return fmt.Sprintf(":turtle: %dms :turtle:", log.Elapsed)
 	default:
 		return ":no_mouth:"
 	}
+}
+
+func (writer *Writer) Post() {
+	writer.LastPostedAt = Now()
+	content := writer.ClearQueue()
+
+	var body = []byte(fmt.Sprintf(`{"channel": "#%s", "username": "%s", "text": "%s"}`, writer.Channel, writer.Username, content))
+
+	fmt.Println(writer.WebHookURL)
+	req, err := http.NewRequest("POST", writer.WebHookURL, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println(fmt.Sprintf("logger-slack-hook error: %v", err))
+	}
+
+	defer resp.Body.Close()
 }
 
 func Now() int64 {
