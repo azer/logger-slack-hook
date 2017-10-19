@@ -106,7 +106,6 @@ func (writer *Writer) Post() {
 
 	var body = []byte(fmt.Sprintf(`{"channel": "#%s", "username": "%s", "text": "%s"}`, writer.Channel, writer.Username, content))
 
-	fmt.Println(writer.WebHookURL)
 	req, err := http.NewRequest("POST", writer.WebHookURL, bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 
@@ -114,9 +113,9 @@ func (writer *Writer) Post() {
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Println(fmt.Sprintf("logger-slack-hook error: %v", err))
+	} else {
+		defer resp.Body.Close()
 	}
-
-	defer resp.Body.Close()
 }
 
 func Now() int64 {
