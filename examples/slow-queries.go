@@ -11,7 +11,7 @@ func main() {
 	// First setup a hook and tell the hook the rules of streaming to the hook.
 	logger.Hook(&slackhook.Writer{
 		// Create a webhook URL in Slack and enter it here.
-		WebHookURL: "https://hooks.slack.com/services/...",
+		WebHookURL: "your webhook url here",
 		Channel:    "slow-queries",
 		Username:   "Query Person",
 		// We don't want to log everything to Slack. It'd be too noisy. We need a filter.
@@ -49,4 +49,6 @@ func main() {
 
 	images.Info("Ok we're done here")
 	mysql.Info("Good bye")
+
+	time.Sleep(20 * time.Second)
 }

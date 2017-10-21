@@ -22,45 +22,48 @@ type Writer struct {
 	IntervalSecs    int
 }
 
-func (writer *Writer) ClearQueue() string {
-	content := ""
-	for _, row := range writer.Queue {
-		content = fmt.Sprintf("%s%s\n", content, row)
-	}
+func (writer *Writer) Init() {
+	writer.IsWorkerRunning = true
+	go writer.Worker()
+}
 
+func (writer *Writer) ClearQueue() []string {
+	rows := writer.Queue
 	writer.Queue = []string{}
-
-	return content
+	return rows
 }
 
 func (writer *Writer) Append(log *logger.Log) {
-	writer.Queue = append(writer.Queue, fmt.Sprintf("%s %s %s", writer.FormatLevel(log), log.Message, writer.FormatAttrs(log.Attrs)))
+	writer.AppendString(fmt.Sprintf("%s %s %s", writer.FormatLevel(log), log.Message, writer.FormatAttrs(log.Attrs)))
+}
 
-	if !writer.IsWorkerRunning {
-		go writer.Worker()
+func (writer *Writer) AppendString(logs ...string) {
+	for _, log := range logs {
+		(*writer).Queue = append((*writer).Queue, log)
 	}
 }
 
 func (writer *Writer) Worker() {
-	if writer.IsWorkerRunning {
-		return
-	}
-
-	writer.IsWorkerRunning = true
 	if writer.IntervalSecs == 0 {
 		writer.IntervalSecs = DEFAULT_INTERVAL_SECS
 	}
 
 	t := time.NewTicker(time.Duration(writer.IntervalSecs) * time.Second)
 	for {
-		writer.Post()
+		if len(writer.Queue) > 0 {
+			rows := writer.ClearQueue()
+			if err := writer.Post(rows); err != nil {
+				writer.AppendString(rows...)
+			}
+		}
+
 		<-t.C
 	}
 
 	writer.IsWorkerRunning = false
 }
 
-func (writer Writer) Write(log *logger.Log) {
+func (writer *Writer) Write(log *logger.Log) {
 	if writer.Filter != nil {
 		if writer.Filter(log) {
 			writer.Append(log)
@@ -100,9 +103,13 @@ func (writer *Writer) FormatLevel(log *logger.Log) string {
 	}
 }
 
-func (writer *Writer) Post() {
+func (writer *Writer) Post(rows []string) error {
+	if len(rows) == 0 {
+		return nil
+	}
+
 	writer.LastPostedAt = Now()
-	content := writer.ClearQueue()
+	content := StringifyRows(rows)
 
 	var body = []byte(fmt.Sprintf(`{"channel": "#%s", "username": "%s", "text": "%s"}`, writer.Channel, writer.Username, content))
 
@@ -112,12 +119,23 @@ func (writer *Writer) Post() {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Println(fmt.Sprintf("logger-slack-hook error: %v", err))
+		return err
 	} else {
 		defer resp.Body.Close()
 	}
+
+	return nil
 }
 
 func Now() int64 {
 	return time.Now().Unix()
+}
+
+func StringifyRows(rows []string) string {
+	content := ""
+	for _, row := range rows {
+		content = fmt.Sprintf("%s%s\n", content, row)
+	}
+
+	return content
 }
